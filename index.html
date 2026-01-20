@@ -1,0 +1,513 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Organizador de Tareas</title>
+    <script crossorigin src="https://unpkg.com/react@18/umd/react.production.min.js"></script>
+    <script crossorigin src="https://unpkg.com/react-dom@18/umd/react-dom.production.min.js"></script>
+    <script src="https://unpkg.com/@babel/standalone/babel.min.js"></script>
+    <script src="https://cdn.tailwindcss.com"></script>
+</head>
+<body>
+    <div id="root"></div>
+    
+    <script>
+        // Implementación de window.storage para localStorage
+        window.storage = {
+            async get(key) {
+                try {
+                    const value = localStorage.getItem(key);
+                    return value ? { key, value, shared: false } : null;
+                } catch (error) {
+                    console.error('Error al leer:', error);
+                    return null;
+                }
+            },
+            async set(key, value) {
+                try {
+                    localStorage.setItem(key, value);
+                    return { key, value, shared: false };
+                } catch (error) {
+                    console.error('Error al guardar:', error);
+                    return null;
+                }
+            },
+            async delete(key) {
+                try {
+                    localStorage.removeItem(key);
+                    return { key, deleted: true, shared: false };
+                } catch (error) {
+                    console.error('Error al eliminar:', error);
+                    return null;
+                }
+            }
+        };
+    </script>
+    
+    <script type="text/babel">
+        const { useState, useEffect } = React;
+        const { Clock, Plus, Trash2, Bell, Check, X, ChevronLeft, ChevronRight, Phone } = lucide;
+
+        function TaskOrganizer() {
+            const [tasks, setTasks] = useState([]);
+            const [currentTime, setCurrentTime] = useState(new Date());
+            const [taskTitle, setTaskTitle] = useState('');
+            const [taskDate, setTaskDate] = useState('');
+            const [taskTime, setTaskTime] = useState('');
+            const [taskDescription, setTaskDescription] = useState('');
+            const [notification, setNotification] = useState(null);
+            const [currentMonth, setCurrentMonth] = useState(new Date());
+            const [selectedDate, setSelectedDate] = useState(new Date());
+            const [phoneNumber, setPhoneNumber] = useState('');
+            const [showPhoneModal, setShowPhoneModal] = useState(false);
+
+            useEffect(() => {
+                loadTasks();
+                loadPhoneNumber();
+            }, []);
+
+            useEffect(() => {
+                if (tasks.length > 0) {
+                    saveTasks();
+                }
+            }, [tasks]);
+
+            useEffect(() => {
+                const timer = setInterval(() => {
+                    setCurrentTime(new Date());
+                    checkReminders();
+                }, 1000);
+                return () => clearInterval(timer);
+            }, [tasks, phoneNumber]);
+
+            const loadTasks = async () => {
+                try {
+                    const result = await window.storage.get('tasks');
+                    if (result && result.value) {
+                        setTasks(JSON.parse(result.value));
+                    }
+                } catch (error) {
+                    console.log('No hay tareas guardadas');
+                }
+            };
+
+            const saveTasks = async () => {
+                try {
+                    await window.storage.set('tasks', JSON.stringify(tasks));
+                } catch (error) {
+                    console.error('Error al guardar:', error);
+                }
+            };
+
+            const loadPhoneNumber = async () => {
+                try {
+                    const result = await window.storage.get('phoneNumber');
+                    if (result && result.value) {
+                        setPhoneNumber(result.value);
+                    }
+                } catch (error) {
+                    console.log('No hay número guardado');
+                }
+            };
+
+            const savePhoneNumber = async (number) => {
+                try {
+                    await window.storage.set('phoneNumber', number);
+                    setPhoneNumber(number);
+                    setShowPhoneModal(false);
+                } catch (error) {
+                    console.error('Error al guardar número:', error);
+                }
+            };
+
+            const checkReminders = () => {
+                const now = new Date();
+                tasks.forEach(task => {
+                    if (!task.completed && !task.notified) {
+                        const taskDateTime = new Date(`${task.date}T${task.time}`);
+                        const timeDiff = taskDateTime - now;
+                        
+                        if (timeDiff > 0 && timeDiff <= 300000) {
+                            showNotification(task);
+                            sendWhatsAppReminder(task);
+                            markAsNotified(task.id);
+                        }
+                    }
+                });
+            };
+
+            const sendWhatsAppReminder = (task) => {
+                if (phoneNumber) {
+                    const message = `🔔 *Recordatorio de Tarea*\n\n📌 ${task.title}\n⏰ ${task.time}\n📅 ${new Date(task.date).toLocaleDateString('es-ES')}\n${task.description ? `\n📝 ${task.description}` : ''}`;
+                    const encodedMessage = encodeURIComponent(message);
+                    const whatsappUrl = `https://wa.me/${phoneNumber}?text=${encodedMessage}`;
+                    window.open(whatsappUrl, '_blank');
+                }
+            };
+
+            const showNotification = (task) => {
+                setNotification({
+                    title: task.title,
+                    time: task.time,
+                    description: task.description
+                });
+                
+                setTimeout(() => {
+                    setNotification(null);
+                }, 10000);
+            };
+
+            const markAsNotified = (taskId) => {
+                setTasks(prevTasks =>
+                    prevTasks.map(task =>
+                        task.id === taskId ? { ...task, notified: true } : task
+                    )
+                );
+            };
+
+            const addTask = () => {
+                if (!taskTitle || !taskDate || !taskTime) {
+                    alert('Por favor completa todos los campos');
+                    return;
+                }
+
+                const newTask = {
+                    id: Date.now(),
+                    title: taskTitle,
+                    date: taskDate,
+                    time: taskTime,
+                    description: taskDescription,
+                    completed: false,
+                    notified: false
+                };
+
+                setTasks([...tasks, newTask]);
+                setTaskTitle('');
+                setTaskDate('');
+                setTaskTime('');
+                setTaskDescription('');
+            };
+
+            const deleteTask = (id) => {
+                setTasks(tasks.filter(task => task.id !== id));
+            };
+
+            const toggleComplete = (id) => {
+                setTasks(tasks.map(task =>
+                    task.id === id ? { ...task, completed: !task.completed } : task
+                ));
+            };
+
+            const formatTime = (date) => {
+                return date.toLocaleTimeString('es-ES', { 
+                    hour: '2-digit', 
+                    minute: '2-digit',
+                    second: '2-digit'
+                });
+            };
+
+            const getDaysInMonth = (date) => {
+                const year = date.getFullYear();
+                const month = date.getMonth();
+                const firstDay = new Date(year, month, 1);
+                const lastDay = new Date(year, month + 1, 0);
+                const daysInMonth = lastDay.getDate();
+                const startingDayOfWeek = firstDay.getDay();
+                
+                return { daysInMonth, startingDayOfWeek };
+            };
+
+            const getTasksForDate = (date) => {
+                const dateStr = date.toISOString().split('T')[0];
+                return tasks.filter(task => task.date === dateStr);
+            };
+
+            const previousMonth = () => {
+                setCurrentMonth(new Date(currentMonth.getFullYear(), currentMonth.getMonth() - 1));
+            };
+
+            const nextMonth = () => {
+                setCurrentMonth(new Date(currentMonth.getFullYear(), currentMonth.getMonth() + 1));
+            };
+
+            const selectDate = (day) => {
+                const newDate = new Date(currentMonth.getFullYear(), currentMonth.getMonth(), day);
+                setSelectedDate(newDate);
+                setTaskDate(newDate.toISOString().split('T')[0]);
+            };
+
+            const isToday = (day) => {
+                const today = new Date();
+                return day === today.getDate() &&
+                    currentMonth.getMonth() === today.getMonth() &&
+                    currentMonth.getFullYear() === today.getFullYear();
+            };
+
+            const isSelected = (day) => {
+                return day === selectedDate.getDate() &&
+                    currentMonth.getMonth() === selectedDate.getMonth() &&
+                    currentMonth.getFullYear() === selectedDate.getFullYear();
+            };
+
+            const renderCalendar = () => {
+                const { daysInMonth, startingDayOfWeek } = getDaysInMonth(currentMonth);
+                const days = [];
+                const dayNames = ['Dom', 'Lun', 'Mar', 'Mié', 'Jue', 'Vie', 'Sáb'];
+
+                for (let i = 0; i < startingDayOfWeek; i++) {
+                    days.push(React.createElement('div', { key: `empty-${i}`, className: "aspect-square" }));
+                }
+
+                for (let day = 1; day <= daysInMonth; day++) {
+                    const date = new Date(currentMonth.getFullYear(), currentMonth.getMonth(), day);
+                    const dayTasks = getTasksForDate(date);
+                    const hasTask = dayTasks.length > 0;
+                    
+                    days.push(
+                        React.createElement('button', {
+                            key: day,
+                            onClick: () => selectDate(day),
+                            className: `aspect-square p-1 rounded-lg text-sm font-medium transition-all relative ${
+                                isToday(day)
+                                    ? 'bg-indigo-600 text-white'
+                                    : isSelected(day)
+                                    ? 'bg-indigo-100 text-indigo-700 ring-2 ring-indigo-500'
+                                    : 'hover:bg-gray-100 text-gray-700'
+                            }`
+                        },
+                            React.createElement('div', { className: "flex flex-col items-center justify-center h-full" },
+                                React.createElement('span', null, day),
+                                hasTask && React.createElement('div', { className: "flex gap-0.5 mt-1" },
+                                    dayTasks.slice(0, 3).map((_, i) =>
+                                        React.createElement('div', {
+                                            key: i,
+                                            className: `w-1 h-1 rounded-full ${isToday(day) ? 'bg-white' : 'bg-indigo-500'}`
+                                        })
+                                    )
+                                )
+                            )
+                        )
+                    );
+                }
+
+                return React.createElement('div', null,
+                    React.createElement('div', { className: "grid grid-cols-7 gap-2 mb-2" },
+                        dayNames.map(name =>
+                            React.createElement('div', { key: name, className: "text-center text-xs font-semibold text-gray-600 py-2" }, name)
+                        )
+                    ),
+                    React.createElement('div', { className: "grid grid-cols-7 gap-2" }, days)
+                );
+            };
+
+            const selectedDateTasks = getTasksForDate(selectedDate);
+
+            return React.createElement('div', { className: "min-h-screen bg-gradient-to-br from-blue-50 to-indigo-100 p-4" },
+                notification && React.createElement('div', { className: "fixed top-4 right-4 bg-yellow-500 text-white p-4 rounded-lg shadow-2xl z-50 animate-bounce max-w-sm" },
+                    React.createElement('div', { className: "flex items-start justify-between" },
+                        React.createElement('div', { className: "flex items-start gap-3" },
+                            React.createElement(Bell, { className: "w-6 h-6 mt-1" }),
+                            React.createElement('div', null,
+                                React.createElement('h3', { className: "font-bold text-lg" }, "¡Recordatorio!"),
+                                React.createElement('p', { className: "font-semibold mt-1" }, notification.title),
+                                React.createElement('p', { className: "text-sm mt-1" }, "Hora: ", notification.time),
+                                notification.description && React.createElement('p', { className: "text-sm mt-1" }, notification.description)
+                            )
+                        ),
+                        React.createElement('button', { onClick: () => setNotification(null), className: "ml-2" },
+                            React.createElement(X, { className: "w-5 h-5" })
+                        )
+                    )
+                ),
+
+                showPhoneModal && React.createElement('div', { className: "fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50" },
+                    React.createElement('div', { className: "bg-white rounded-2xl p-6 max-w-md w-full mx-4" },
+                        React.createElement('h3', { className: "text-xl font-bold mb-4" }, "Configurar WhatsApp"),
+                        React.createElement('p', { className: "text-gray-600 mb-4" }, "Ingresa tu número de WhatsApp con código de país (ej: 573001234567)"),
+                        React.createElement('input', {
+                            type: "tel",
+                            placeholder: "573001234567",
+                            value: phoneNumber,
+                            onChange: (e) => setPhoneNumber(e.target.value.replace(/\D/g, '')),
+                            className: "w-full px-4 py-3 border border-gray-300 rounded-lg mb-4"
+                        }),
+                        React.createElement('div', { className: "flex gap-2" },
+                            React.createElement('button', {
+                                onClick: () => savePhoneNumber(phoneNumber),
+                                className: "flex-1 bg-green-600 hover:bg-green-700 text-white font-semibold py-2 rounded-lg"
+                            }, "Guardar"),
+                            React.createElement('button', {
+                                onClick: () => setShowPhoneModal(false),
+                                className: "flex-1 bg-gray-300 hover:bg-gray-400 text-gray-700 font-semibold py-2 rounded-lg"
+                            }, "Cancelar")
+                        )
+                    )
+                ),
+
+                React.createElement('div', { className: "max-w-7xl mx-auto" },
+                    React.createElement('div', { className: "bg-white rounded-2xl shadow-xl p-4 sm:p-6 mb-6" },
+                        React.createElement('div', { className: "flex flex-col sm:flex-row items-center justify-between gap-4" },
+                            React.createElement('div', { className: "flex items-center gap-4" },
+                                React.createElement(Clock, { className: "w-10 h-10 text-indigo-600" }),
+                                React.createElement('div', { className: "text-3xl font-bold text-gray-800" }, formatTime(currentTime))
+                            ),
+                            React.createElement('button', {
+                                onClick: () => setShowPhoneModal(true),
+                                className: "flex items-center gap-2 bg-green-600 hover:bg-green-700 text-white px-4 py-2 rounded-lg transition"
+                            },
+                                React.createElement(Phone, { className: "w-5 h-5" }),
+                                phoneNumber ? 'Cambiar WhatsApp' : 'Configurar WhatsApp'
+                            )
+                        )
+                    ),
+
+                    React.createElement('div', { className: "grid grid-cols-1 lg:grid-cols-3 gap-6" },
+                        React.createElement('div', { className: "lg:col-span-1" },
+                            React.createElement('div', { className: "bg-white rounded-2xl shadow-xl p-6 mb-6" },
+                                React.createElement('div', { className: "flex items-center justify-between mb-4" },
+                                    React.createElement('button', { onClick: previousMonth, className: "p-2 hover:bg-gray-100 rounded-lg" },
+                                        React.createElement(ChevronLeft, { className: "w-5 h-5" })
+                                    ),
+                                    React.createElement('h2', { className: "text-xl font-bold text-gray-800" },
+                                        currentMonth.toLocaleDateString('es-ES', { month: 'long', year: 'numeric' })
+                                    ),
+                                    React.createElement('button', { onClick: nextMonth, className: "p-2 hover:bg-gray-100 rounded-lg" },
+                                        React.createElement(ChevronRight, { className: "w-5 h-5" })
+                                    )
+                                ),
+                                renderCalendar()
+                            ),
+
+                            React.createElement('div', { className: "bg-white rounded-2xl shadow-xl p-6" },
+                                React.createElement('h2', { className: "text-xl font-bold text-gray-800 mb-4 flex items-center gap-2" },
+                                    React.createElement(Plus, { className: "w-6 h-6" }),
+                                    "Nueva Tarea"
+                                ),
+                                
+                                React.createElement('div', { className: "space-y-3" },
+                                    React.createElement('input', {
+                                        type: "text",
+                                        placeholder: "Título",
+                                        value: taskTitle,
+                                        onChange: (e) => setTaskTitle(e.target.value),
+                                        className: "w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-indigo-500 outline-none text-sm"
+                                    }),
+                                    
+                                    React.createElement('input', {
+                                        type: "date",
+                                        value: taskDate,
+                                        onChange: (e) => setTaskDate(e.target.value),
+                                        className: "w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-indigo-500 outline-none text-sm"
+                                    }),
+                                    
+                                    React.createElement('input', {
+                                        type: "time",
+                                        value: taskTime,
+                                        onChange: (e) => setTaskTime(e.target.value),
+                                        className: "w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-indigo-500 outline-none text-sm"
+                                    }),
+                                    
+                                    React.createElement('textarea', {
+                                        placeholder: "Descripción (opcional)",
+                                        value: taskDescription,
+                                        onChange: (e) => setTaskDescription(e.target.value),
+                                        className: "w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-indigo-500 outline-none resize-none text-sm",
+                                        rows: "2"
+                                    }),
+                                    
+                                    React.createElement('button', {
+                                        onClick: addTask,
+                                        className: "w-full bg-indigo-600 hover:bg-indigo-700 text-white font-semibold py-2 rounded-lg transition flex items-center justify-center gap-2"
+                                    },
+                                        React.createElement(Plus, { className: "w-5 h-5" }),
+                                        "Agregar"
+                                    )
+                                )
+                            )
+                        ),
+
+                        React.createElement('div', { className: "lg:col-span-2" },
+                            React.createElement('div', { className: "bg-white rounded-2xl shadow-xl p-6" },
+                                React.createElement('h2', { className: "text-2xl font-bold text-gray-800 mb-4" },
+                                    "Tareas del ", selectedDate.toLocaleDateString('es-ES', { day: 'numeric', month: 'long' }),
+                                    React.createElement('span', { className: "text-lg text-gray-500 ml-2" }, `(${selectedDateTasks.length})`)
+                                ),
+                                
+                                React.createElement('div', { className: "space-y-3 max-h-[600px] overflow-y-auto" },
+                                    selectedDateTasks.length === 0 ? (
+                                        React.createElement('p', { className: "text-gray-500 text-center py-8" }, "No hay tareas para este día")
+                                    ) : (
+                                        selectedDateTasks
+                                            .sort((a, b) => a.time.localeCompare(b.time))
+                                            .map(task =>
+                                                React.createElement('div', {
+                                                    key: task.id,
+                                                    className: `p-4 rounded-lg border-2 transition ${
+                                                        task.completed
+                                                            ? 'bg-green-50 border-green-300'
+                                                            : 'bg-gray-50 border-gray-200 hover:border-indigo-300'
+                                                    }`
+                                                },
+                                                    React.createElement('div', { className: "flex items-start justify-between" },
+                                                        React.createElement('div', { className: "flex-1" },
+                                                            React.createElement('div', { className: "flex items-center gap-2 mb-1" },
+                                                                React.createElement('button', {
+                                                                    onClick: () => toggleComplete(task.id),
+                                                                    className: `w-6 h-6 rounded-full border-2 flex items-center justify-center transition ${
+                                                                        task.completed
+                                                                            ? 'bg-green-500 border-green-500'
+                                                                            : 'border-gray-400 hover:border-indigo-500'
+                                                                    }`
+                                                                },
+                                                                    task.completed && React.createElement(Check, { className: "w-4 h-4 text-white" })
+                                                                ),
+                                                                React.createElement('h3', { className: `font-semibold text-lg ${task.completed ? 'line-through text-gray-500' : 'text-gray-800'}` },
+                                                                    task.title
+                                                                )
+                                                            ),
+                                                            
+                                                            React.createElement('div', { className: "ml-8 space-y-1" },
+                                                                React.createElement('p', { className: "text-sm text-gray-600" }, "⏰ ", task.time),
+                                                                task.description && React.createElement('p', { className: "text-sm text-gray-600" }, task.description)
+                                                            )
+                                                        ),
+                                                        
+                                                        React.createElement('button', {
+                                                            onClick: () => deleteTask(task.id),
+                                                            className: "ml-2 p-2 text-red-500 hover:bg-red-50 rounded-lg transition"
+                                                        },
+                                                            React.createElement(Trash2, { className: "w-5 h-5" })
+                                                        )
+                                                    )
+                                                )
+                                            )
+                                    )
+                                )
+                            ),
+
+                            React.createElement('div', { className: "mt-6 bg-blue-50 border-2 border-blue-200 rounded-lg p-4" },
+                                React.createElement('div', { className: "flex items-start gap-2 text-blue-800" },
+                                    React.createElement(Bell, { className: "w-5 h-5 mt-0.5" }),
+                                    React.createElement('div', { className: "text-sm" },
+                                        React.createElement('p', { className: "font-medium" }, "Los recordatorios se enviarán:"),
+                                        React.createElement('ul', { className: "list-disc ml-4 mt-1" },
+                                            React.createElement('li', null, "Notificación en pantalla 5 minutos antes"),
+                                            React.createElement('li', null, "Mensaje de WhatsApp automático (si está configurado)")
+                                        )
+                                    )
+                                )
+                            )
+                        )
+                    )
+                )
+            );
+        }
+
+        const root = ReactDOM.createRoot(document.getElementById('root'));
+        root.render(React.createElement(TaskOrganizer));
+    </script>
+    
+    <script src="https://unpkg.com/lucide@latest/dist/umd/lucide.min.js"></script>
+</body>
+</html>
